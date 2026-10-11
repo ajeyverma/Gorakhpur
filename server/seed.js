@@ -63,19 +63,7 @@ const defaultContent = [
 
 const seed = async () => {
   try {
-    const shouldReset = process.argv.includes('--reset');
     await connectDB();
-
-    if (shouldReset) {
-      await Promise.all([
-        User.deleteMany({}),
-        Service.deleteMany({}),
-        FAQ.deleteMany({}),
-        Testimonial.deleteMany({}),
-        SiteContent.deleteMany({}),
-      ]);
-      console.log('🗑️  Cleared existing data (--reset flag provided)');
-    }
 
     const { isStrongPassword } = require('./src/utils/validation');
     const rawPass = process.env.ADMIN_PASSWORD;
@@ -89,15 +77,15 @@ const seed = async () => {
       adminPass = 'Admin@123456';
     }
 
-    // Create or update admin user safely without deleting existing users
+    // Ensure admin user exists idempotently without deleting or overwriting existing accounts
     const adminEmail = (process.env.ADMIN_EMAIL || 'amannishad6476@gmail.com').toLowerCase().trim();
     let admin = await User.findOne({ email: adminEmail }).select('+password');
     if (admin) {
-      admin.password = adminPass;
-      admin.isActive = true;
-      admin.role = 'superadmin';
-      await admin.save();
-      console.log(`✅ Existing admin user synchronized securely: ${admin.email}`);
+      if (admin.password && !admin.password.startsWith('$2a$') && !admin.password.startsWith('$2b$')) {
+        admin.password = await bcrypt.hash(admin.password, 12);
+        await admin.save({ validateBeforeSave: false });
+      }
+      console.log(`✅ Existing admin user preserved: ${admin.email}`);
     } else {
       admin = await User.create({
         name: 'Munnalal Painter Admin',
@@ -109,7 +97,7 @@ const seed = async () => {
       console.log(`✅ Admin user created securely: ${admin.email}`);
     }
 
-    // Seed missing collections without overwriting existing production data
+    // Seed missing collections without overwriting or deleting existing production data
     if ((await Service.countDocuments()) === 0) {
       await Service.insertMany(services);
       console.log(`✅ ${services.length} services seeded`);
@@ -134,7 +122,7 @@ const seed = async () => {
     console.log(`\n📧 Admin Account ready for: ${admin.email}`);
     process.exit(0);
   } catch (error) {
-    console.error('❌ Seed error:', error);
+    console.error('❌ Seed error:', error.message);
     process.exit(1);
   }
 };

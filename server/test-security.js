@@ -10,6 +10,7 @@ const app = require('./src/index');
 const User = require('./src/models/User');
 const Banner = require('./src/models/Banner');
 const Service = require('./src/models/Service');
+const connectDB = require('./src/config/db');
 const autoSeed = require('./src/utils/autoSeed');
 
 let mongod;
@@ -49,7 +50,7 @@ async function runTests() {
   }
 
   try {
-    // 1. Setup in-memory MongoDB
+    // 1. Setup test MongoDB instance
     mongod = await MongoMemoryServer.create({ spawnTimeoutMS: 60000 });
     const uri = mongod.getUri();
     await mongoose.connect(uri);
@@ -60,8 +61,18 @@ async function runTests() {
     const port = server.address().port;
     baseUrl = `http://127.0.0.1:${port}`;
 
-    // 3. Run autoSeed
-    await autoSeed();
+    // Verify login fails with 401 when admin account is missing (before seeding)
+    const preSeedLogin = await request('/api/auth/login', {
+      method: 'POST',
+      body: { email: 'admin@munnalaltest.com', password: 'TestAdmin@2026!' },
+    });
+    assert(preSeedLogin.status === 401, 'Login returns 401 when admin account is missing from database');
+
+    // 3. Connect via connectDB() with explicitly configured MONGODB_URI (which also runs autoSeed)
+    await mongoose.disconnect();
+    process.env.MONGODB_URI = uri;
+    await connectDB();
+    assert(mongoose.connection.readyState === 1, 'connectDB() connects with explicitly configured MONGODB_URI');
 
     // -------------------------------------------------------------
     console.log('\n--- 1. Admin Initialization & Password Security ---');
@@ -323,48 +334,58 @@ async function runTests() {
     assert(invalidTokenRes.status === 401, 'Protected endpoint rejects invalid/tampered token with 401');
 
     // -------------------------------------------------------------
-    console.log('\n--- 9. Environment Variable Change & Admin Sync ---');
-    process.env.ADMIN_EMAIL = 'amannishad6476@gmail.com';
-    process.env.ADMIN_PASSWORD = 'Admin@123456';
-    await autoSeed();
-
-    const oldEmailLogin = await request('/api/auth/login', {
-      method: 'POST',
-      body: { email: 'admin@munnalaltest.com', password: 'Admin@123456' },
-    });
-    assert(oldEmailLogin.status === 401, 'Previous admin email returns 401 after ADMIN_EMAIL synchronization');
-
-    const syncedLogin = await request('/api/auth/login', {
-      method: 'POST',
-      body: { email: 'amannishad6476@gmail.com', password: 'Admin@123456' },
-    });
-    assert(syncedLogin.status === 200 && typeof syncedLogin.data.token === 'string', 'Updated ADMIN_EMAIL and ADMIN_PASSWORD succeed with 200 and token after autoSeed');
-
-    const syncedAdminCheck = await request('/api/stats/dashboard', {
-      token: syncedLogin.data.token,
-    });
-    assert(syncedAdminCheck.status === 200, 'Protected admin endpoint accepts token from synchronized admin account');
-
-    // Missing admin account scenario & safe recovery without deleting existing data
-    await User.deleteMany({});
-    const missingAdminLogin = await request('/api/auth/login', {
-      method: 'POST',
-      body: { email: 'amannishad6476@gmail.com', password: 'Admin@123456' },
-    });
-    assert(missingAdminLogin.status === 401, 'Login returns 401 when admin account is missing from database');
-
+    console.log('\n--- 9. Idempotent Seeding, Data Preservation & Production DB Fail-Fast ---');
     const serviceCountBefore = await Service.countDocuments();
     process.env.ADMIN_EMAIL = 'admin@munnalalpainter.com';
     process.env.ADMIN_PASSWORD = 'Admin@123456';
     await autoSeed();
     const serviceCountAfter = await Service.countDocuments();
-    assert(serviceCountAfter === serviceCountBefore && serviceCountAfter > 0, 'autoSeed preserves existing database records during admin recovery');
+    assert(serviceCountAfter === serviceCountBefore && serviceCountAfter > 0, 'autoSeed is idempotent and preserves existing database records');
 
-    const recoveredOwnerLogin = await request('/api/auth/login', {
+    // Existing admin account (admin@munnalaltest.com) and its changed password must be preserved
+    const preservedAdminLogin = await request('/api/auth/login', {
+      method: 'POST',
+      body: { email: 'admin@munnalaltest.com', password: 'NewStrong@Password2026!' },
+    });
+    assert(preservedAdminLogin.status === 200, 'Existing admin account and its changed password are preserved across autoSeed runs');
+
+    // Newly configured admin account (and owner account) is also initialized without deleting existing accounts
+    const ownerLogin = await request('/api/auth/login', {
       method: 'POST',
       body: { email: 'amannishad6476@gmail.com', password: 'Admin@123456' },
     });
-    assert(recoveredOwnerLogin.status === 200 && typeof recoveredOwnerLogin.data.token === 'string', 'Owner admin account succeeds even when legacy admin@munnalalpainter.com is set in ADMIN_EMAIL');
+    assert(ownerLogin.status === 200 && typeof ownerLogin.data.token === 'string', 'Initialized owner admin account succeeds with 200 and token');
+
+    // Test production database fail-fast behavior (no silent in-memory fallback)
+    await mongoose.disconnect();
+    process.env.NODE_ENV = 'production';
+
+    // 1) Missing MONGODB_URI in production
+    process.env.MONGODB_URI = '';
+    let missingUriFailed = false;
+    try {
+      await connectDB();
+    } catch (err) {
+      missingUriFailed = err.message.includes('MONGODB_URI environment variable is missing in production');
+    }
+    assert(missingUriFailed, 'Production connectDB() fails fast when MONGODB_URI is missing');
+    assert(mongoose.connection.readyState === 0, 'Production does NOT start in-memory fallback when MONGODB_URI is missing');
+
+    // 2) Unreachable MongoDB in production (and credential sanitization)
+    process.env.MONGODB_URI = 'mongodb://amannishad6476_db_user:SuperSecretAtlasPass123@127.0.0.1:27099/munnalal_painter';
+    let unreachableFailed = false;
+    let leakedPassword = false;
+    try {
+      await connectDB({ serverSelectionTimeoutMS: 500 });
+    } catch (err) {
+      unreachableFailed = err.message.includes('Production MongoDB connection failed');
+      leakedPassword = err.message.includes('SuperSecretAtlasPass123');
+    }
+    assert(unreachableFailed, 'Production connectDB() fails fast when MongoDB is unreachable');
+    assert(!leakedPassword, 'Database error messages never expose database passwords');
+    assert(mongoose.connection.readyState === 0, 'Production does NOT silently start in-memory MongoMemoryServer when connection fails');
+
+    process.env.NODE_ENV = 'test';
 
     console.log(`\n========================================`);
     console.log(`📊 Test Results: ${passed} Passed, ${failed} Failed`);

@@ -53,117 +53,53 @@ const defaultContent = [
 
 const PLACEHOLDER_EMAILS = ['your-admin-email@example.com', 'admin@example.com', 'your_email@gmail.com'];
 
-const syncAdminAccount = async (targetEmail, password) => {
+const ensureAdminAccount = async (targetEmail, password) => {
   const existingAdmin = await User.findOne({ email: targetEmail }).select('+password');
-  if (!existingAdmin) return false;
-
-  let updated = false;
-  if (!existingAdmin.isActive) {
-    existingAdmin.isActive = true;
-    updated = true;
-  }
-  if (!existingAdmin.password.startsWith('$2a$') && !existingAdmin.password.startsWith('$2b$')) {
-    existingAdmin.password = await bcrypt.hash(existingAdmin.password, 12);
-    updated = true;
-  } else if (process.env.ADMIN_PASSWORD && isStrongPassword(process.env.ADMIN_PASSWORD)) {
-    const isSamePassword = await bcrypt.compare(process.env.ADMIN_PASSWORD, existingAdmin.password);
-    if (!isSamePassword) {
-      existingAdmin.password = process.env.ADMIN_PASSWORD;
-      updated = true;
+  if (existingAdmin) {
+    if (existingAdmin.password && !existingAdmin.password.startsWith('$2a$') && !existingAdmin.password.startsWith('$2b$')) {
+      existingAdmin.password = await bcrypt.hash(existingAdmin.password, 12);
+      await existingAdmin.save({ validateBeforeSave: false });
+      console.log(`👤 Migrated unhashed password for existing admin: ${existingAdmin.email}`);
     }
-  } else if (!process.env.ADMIN_PASSWORD) {
-    const hasLegacyFallback = await bcrypt.compare('Munnalal@2026!Admin', existingAdmin.password);
-    if (hasLegacyFallback) {
-      existingAdmin.password = password;
-      updated = true;
-    }
+    return existingAdmin;
   }
 
-  if (updated) {
-    await existingAdmin.save();
-    console.log(`👤 Admin account synchronized from environment for: ${existingAdmin.email}`);
-  }
-  return true;
+  const created = await User.create({
+    name: 'Munnalal Painter Admin',
+    email: targetEmail,
+    password,
+    role: 'superadmin',
+    isActive: true,
+  });
+  console.log(`👤 Admin account initialized securely for: ${targetEmail}`);
+  return created;
 };
 
 const autoSeed = async () => {
   try {
+    // Migrate any legacy unhashed user passwords without overwriting hashed passwords
+    const existingUsers = await User.find().select('+password');
+    for (const u of existingUsers) {
+      if (u.password && !u.password.startsWith('$2a$') && !u.password.startsWith('$2b$')) {
+        u.password = await bcrypt.hash(u.password, 12);
+        await u.save({ validateBeforeSave: false });
+      }
+    }
+
     const rawEnvEmail = (process.env.ADMIN_EMAIL || '').toLowerCase().trim();
     const adminEmail = (rawEnvEmail && !PLACEHOLDER_EMAILS.includes(rawEnvEmail))
       ? rawEnvEmail
       : 'amannishad6476@gmail.com';
     const rawPassword = process.env.ADMIN_PASSWORD || 'Admin@123456';
     if (process.env.ADMIN_PASSWORD && !isStrongPassword(process.env.ADMIN_PASSWORD)) {
-      console.warn('⚠️ ADMIN_PASSWORD in environment does not meet complexity requirements (min 12 chars, uppercase, lowercase, number, special char). Using default fallback password.');
+      console.warn('⚠️ ADMIN_PASSWORD in environment does not meet complexity requirements (min 12 chars, uppercase, lowercase, number, special char). Using default fallback password for initial admin creation.');
     }
     const password = isStrongPassword(rawPassword) ? rawPassword : 'Admin@123456';
 
-    const existingAdmin = await User.findOne({
-      $or: [
-        { email: adminEmail },
-        { role: { $in: ['admin', 'superadmin'] } },
-      ],
-    }).select('+password');
+    await ensureAdminAccount(adminEmail, password);
 
-    if (existingAdmin) {
-      let updated = false;
-
-      if (existingAdmin.email !== adminEmail) {
-        existingAdmin.email = adminEmail;
-        updated = true;
-      }
-
-      if (!existingAdmin.isActive) {
-        existingAdmin.isActive = true;
-        updated = true;
-      }
-
-      if (!existingAdmin.password.startsWith('$2a$') && !existingAdmin.password.startsWith('$2b$')) {
-        existingAdmin.password = await bcrypt.hash(existingAdmin.password, 12);
-        updated = true;
-      } else if (process.env.ADMIN_PASSWORD && isStrongPassword(process.env.ADMIN_PASSWORD)) {
-        const isSamePassword = await bcrypt.compare(process.env.ADMIN_PASSWORD, existingAdmin.password);
-        if (!isSamePassword) {
-          existingAdmin.password = process.env.ADMIN_PASSWORD;
-          updated = true;
-        }
-      } else if (!process.env.ADMIN_PASSWORD) {
-        const hasLegacyFallback = await bcrypt.compare('Munnalal@2026!Admin', existingAdmin.password);
-        if (hasLegacyFallback) {
-          existingAdmin.password = password;
-          updated = true;
-        }
-      }
-
-      if (updated) {
-        await existingAdmin.save();
-        console.log(`👤 Admin account synchronized from environment for: ${existingAdmin.email}`);
-      }
-    } else {
-      await User.create({
-        name: 'Munnalal Painter Admin',
-        email: adminEmail,
-        password,
-        role: 'superadmin',
-        isActive: true,
-      });
-      console.log(`👤 Admin account initialized securely for: ${adminEmail}`);
-    }
-
-    // If legacy placeholder admin@munnalalpainter.com is set in ADMIN_EMAIL, also ensure owner email is initialized
     if (adminEmail === 'admin@munnalalpainter.com') {
-      const ownerEmail = 'amannishad6476@gmail.com';
-      const ownerExists = await syncAdminAccount(ownerEmail, password);
-      if (!ownerExists) {
-        await User.create({
-          name: 'Munnalal Painter Admin',
-          email: ownerEmail,
-          password,
-          role: 'superadmin',
-          isActive: true,
-        });
-        console.log(`👤 Owner admin account initialized securely for: ${ownerEmail}`);
-      }
+      await ensureAdminAccount('amannishad6476@gmail.com', password);
     }
 
     const serviceCount = await Service.countDocuments();

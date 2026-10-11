@@ -133,10 +133,8 @@ if (process.env.NODE_ENV !== 'test') {
       });
     })
     .catch((err) => {
-      console.error('Database startup warning:', err.message);
-      server = app.listen(PORT, () => {
-        console.log(`🚀 Server running in fallback mode on port ${PORT}`);
-      });
+      console.error(`❌ Server startup aborted due to database error: ${err.message}`);
+      process.exit(1);
     });
 
   // Handle unhandled promise rejections
