@@ -345,6 +345,27 @@ async function runTests() {
     });
     assert(syncedAdminCheck.status === 200, 'Protected admin endpoint accepts token from synchronized admin account');
 
+    // Missing admin account scenario & safe recovery without deleting existing data
+    await User.deleteMany({});
+    const missingAdminLogin = await request('/api/auth/login', {
+      method: 'POST',
+      body: { email: 'amannishad6476@gmail.com', password: 'Admin@123456' },
+    });
+    assert(missingAdminLogin.status === 401, 'Login returns 401 when admin account is missing from database');
+
+    const serviceCountBefore = await Service.countDocuments();
+    process.env.ADMIN_EMAIL = 'admin@munnalalpainter.com';
+    process.env.ADMIN_PASSWORD = 'Admin@123456';
+    await autoSeed();
+    const serviceCountAfter = await Service.countDocuments();
+    assert(serviceCountAfter === serviceCountBefore && serviceCountAfter > 0, 'autoSeed preserves existing database records during admin recovery');
+
+    const recoveredOwnerLogin = await request('/api/auth/login', {
+      method: 'POST',
+      body: { email: 'amannishad6476@gmail.com', password: 'Admin@123456' },
+    });
+    assert(recoveredOwnerLogin.status === 200 && typeof recoveredOwnerLogin.data.token === 'string', 'Owner admin account succeeds even when legacy admin@munnalalpainter.com is set in ADMIN_EMAIL');
+
     console.log(`\n========================================`);
     console.log(`📊 Test Results: ${passed} Passed, ${failed} Failed`);
     console.log(`========================================\n`);

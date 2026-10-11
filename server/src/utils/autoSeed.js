@@ -51,9 +51,47 @@ const defaultContent = [
   { key: 'hero_subtitle', value: 'Premium Quality Painting for Homes, Offices & Commercial Spaces in Gorakhpur', type: 'text', label: 'Hero Subtitle', group: 'home' },
 ];
 
+const PLACEHOLDER_EMAILS = ['your-admin-email@example.com', 'admin@example.com', 'your_email@gmail.com'];
+
+const syncAdminAccount = async (targetEmail, password) => {
+  const existingAdmin = await User.findOne({ email: targetEmail }).select('+password');
+  if (!existingAdmin) return false;
+
+  let updated = false;
+  if (!existingAdmin.isActive) {
+    existingAdmin.isActive = true;
+    updated = true;
+  }
+  if (!existingAdmin.password.startsWith('$2a$') && !existingAdmin.password.startsWith('$2b$')) {
+    existingAdmin.password = await bcrypt.hash(existingAdmin.password, 12);
+    updated = true;
+  } else if (process.env.ADMIN_PASSWORD && isStrongPassword(process.env.ADMIN_PASSWORD)) {
+    const isSamePassword = await bcrypt.compare(process.env.ADMIN_PASSWORD, existingAdmin.password);
+    if (!isSamePassword) {
+      existingAdmin.password = process.env.ADMIN_PASSWORD;
+      updated = true;
+    }
+  } else if (!process.env.ADMIN_PASSWORD) {
+    const hasLegacyFallback = await bcrypt.compare('Munnalal@2026!Admin', existingAdmin.password);
+    if (hasLegacyFallback) {
+      existingAdmin.password = password;
+      updated = true;
+    }
+  }
+
+  if (updated) {
+    await existingAdmin.save();
+    console.log(`👤 Admin account synchronized from environment for: ${existingAdmin.email}`);
+  }
+  return true;
+};
+
 const autoSeed = async () => {
   try {
-    const adminEmail = (process.env.ADMIN_EMAIL || 'amannishad6476@gmail.com').toLowerCase().trim();
+    const rawEnvEmail = (process.env.ADMIN_EMAIL || '').toLowerCase().trim();
+    const adminEmail = (rawEnvEmail && !PLACEHOLDER_EMAILS.includes(rawEnvEmail))
+      ? rawEnvEmail
+      : 'amannishad6476@gmail.com';
     const rawPassword = process.env.ADMIN_PASSWORD || 'Admin@123456';
     if (process.env.ADMIN_PASSWORD && !isStrongPassword(process.env.ADMIN_PASSWORD)) {
       console.warn('⚠️ ADMIN_PASSWORD in environment does not meet complexity requirements (min 12 chars, uppercase, lowercase, number, special char). Using default fallback password.');
@@ -110,6 +148,22 @@ const autoSeed = async () => {
         isActive: true,
       });
       console.log(`👤 Admin account initialized securely for: ${adminEmail}`);
+    }
+
+    // If legacy placeholder admin@munnalalpainter.com is set in ADMIN_EMAIL, also ensure owner email is initialized
+    if (adminEmail === 'admin@munnalalpainter.com') {
+      const ownerEmail = 'amannishad6476@gmail.com';
+      const ownerExists = await syncAdminAccount(ownerEmail, password);
+      if (!ownerExists) {
+        await User.create({
+          name: 'Munnalal Painter Admin',
+          email: ownerEmail,
+          password,
+          role: 'superadmin',
+          isActive: true,
+        });
+        console.log(`👤 Owner admin account initialized securely for: ${ownerEmail}`);
+      }
     }
 
     const serviceCount = await Service.countDocuments();

@@ -63,17 +63,19 @@ const defaultContent = [
 
 const seed = async () => {
   try {
+    const shouldReset = process.argv.includes('--reset');
     await connectDB();
-    
-    // Clear existing data
-    await Promise.all([
-      User.deleteMany({}),
-      Service.deleteMany({}),
-      FAQ.deleteMany({}),
-      Testimonial.deleteMany({}),
-      SiteContent.deleteMany({}),
-    ]);
-    console.log('🗑️  Cleared existing data');
+
+    if (shouldReset) {
+      await Promise.all([
+        User.deleteMany({}),
+        Service.deleteMany({}),
+        FAQ.deleteMany({}),
+        Testimonial.deleteMany({}),
+        SiteContent.deleteMany({}),
+      ]);
+      console.log('🗑️  Cleared existing data (--reset flag provided)');
+    }
 
     const { isStrongPassword } = require('./src/utils/validation');
     const rawPass = process.env.ADMIN_PASSWORD;
@@ -87,31 +89,49 @@ const seed = async () => {
       adminPass = 'Admin@123456';
     }
 
-    // Create admin user
+    // Create or update admin user safely without deleting existing users
     const adminEmail = (process.env.ADMIN_EMAIL || 'amannishad6476@gmail.com').toLowerCase().trim();
-    const admin = await User.create({
-      name: 'Munnalal Painter Admin',
-      email: adminEmail,
-      password: adminPass,
-      role: 'superadmin',
-    });
-    console.log(`✅ Admin user created securely: ${admin.email}`);
+    let admin = await User.findOne({ email: adminEmail }).select('+password');
+    if (admin) {
+      admin.password = adminPass;
+      admin.isActive = true;
+      admin.role = 'superadmin';
+      await admin.save();
+      console.log(`✅ Existing admin user synchronized securely: ${admin.email}`);
+    } else {
+      admin = await User.create({
+        name: 'Munnalal Painter Admin',
+        email: adminEmail,
+        password: adminPass,
+        role: 'superadmin',
+        isActive: true,
+      });
+      console.log(`✅ Admin user created securely: ${admin.email}`);
+    }
 
-    // Seed data
-    await Service.insertMany(services);
-    console.log(`✅ ${services.length} services seeded`);
+    // Seed missing collections without overwriting existing production data
+    if ((await Service.countDocuments()) === 0) {
+      await Service.insertMany(services);
+      console.log(`✅ ${services.length} services seeded`);
+    }
 
-    await FAQ.insertMany(faqs);
-    console.log(`✅ ${faqs.length} FAQs seeded`);
+    if ((await FAQ.countDocuments()) === 0) {
+      await FAQ.insertMany(faqs);
+      console.log(`✅ ${faqs.length} FAQs seeded`);
+    }
 
-    await Testimonial.insertMany(testimonials);
-    console.log(`✅ ${testimonials.length} testimonials seeded`);
+    if ((await Testimonial.countDocuments()) === 0) {
+      await Testimonial.insertMany(testimonials);
+      console.log(`✅ ${testimonials.length} testimonials seeded`);
+    }
 
-    await SiteContent.insertMany(defaultContent);
-    console.log(`✅ ${defaultContent.length} site content entries seeded`);
+    if ((await SiteContent.countDocuments()) === 0) {
+      await SiteContent.insertMany(defaultContent);
+      console.log(`✅ ${defaultContent.length} site content entries seeded`);
+    }
 
-    console.log('\n🎉 Database seeded successfully!');
-    console.log(`\n📧 Admin Account initialized for: ${admin.email}`);
+    console.log('\n🎉 Database seed/initialization completed safely!');
+    console.log(`\n📧 Admin Account ready for: ${admin.email}`);
     process.exit(0);
   } catch (error) {
     console.error('❌ Seed error:', error);
