@@ -82,9 +82,9 @@ const seed = async () => {
       adminPass = rawPass;
     } else if (rawPass) {
       console.warn('⚠️ ADMIN_PASSWORD in environment does not meet complexity requirements. Using secure fallback.');
-      adminPass = 'Munnalal@2026!Admin';
+      adminPass = 'Admin@123456';
     } else {
-      adminPass = 'Munnalal@2026!Admin';
+      adminPass = 'Admin@123456';
     }
 
     // Create admin user

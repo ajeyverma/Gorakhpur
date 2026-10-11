@@ -32,6 +32,9 @@ const projectRoutes = require('./routes/project.routes');
 
 const app = express();
 
+// Trust first proxy (Render / Cloudflare) for accurate rate limiting and secure cookies
+app.set('trust proxy', 1);
+
 // Security headers
 app.use(helmet({
   crossOriginResourcePolicy: { policy: 'cross-origin' },

@@ -3,8 +3,9 @@ const autoSeed = require('../utils/autoSeed');
 
 const connectDB = async () => {
   try {
+    const timeoutMS = process.env.NODE_ENV === 'production' ? 15000 : 3000;
     const conn = await mongoose.connect(process.env.MONGODB_URI, {
-      serverSelectionTimeoutMS: 3000,
+      serverSelectionTimeoutMS: timeoutMS,
     });
     console.log(`✅ MongoDB Connected: ${conn.connection.host}`);
     await autoSeed();

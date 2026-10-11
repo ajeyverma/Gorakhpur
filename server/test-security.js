@@ -109,6 +109,35 @@ async function runTests() {
 
     // -------------------------------------------------------------
     console.log('\n--- 4. Admin Authentication Flow ---');
+    // Missing email and password
+    const missingBothLogin = await request('/api/auth/login', {
+      method: 'POST',
+      body: {},
+    });
+    assert(missingBothLogin.status === 400, 'Login with missing email and password returns 400');
+    assert(missingBothLogin.data.message === 'Please provide email and password.', 'Expected validation message returned when credentials are missing');
+
+    // Missing password
+    const missingPassLogin = await request('/api/auth/login', {
+      method: 'POST',
+      body: { email: 'admin@munnalaltest.com' },
+    });
+    assert(missingPassLogin.status === 400, 'Login with missing password returns 400');
+
+    // Missing email
+    const missingEmailLogin = await request('/api/auth/login', {
+      method: 'POST',
+      body: { password: 'TestAdmin@2026!' },
+    });
+    assert(missingEmailLogin.status === 400, 'Login with missing email returns 400');
+
+    // Invalid email format
+    const invalidEmailLogin = await request('/api/auth/login', {
+      method: 'POST',
+      body: { email: 'not-an-email', password: 'TestAdmin@2026!' },
+    });
+    assert(invalidEmailLogin.status === 400, 'Login with invalid email format returns 400');
+
     // Wrong password
     const wrongLogin = await request('/api/auth/login', {
       method: 'POST',
@@ -292,6 +321,29 @@ async function runTests() {
       token: 'invalid_or_manipulated_jwt_token',
     });
     assert(invalidTokenRes.status === 401, 'Protected endpoint rejects invalid/tampered token with 401');
+
+    // -------------------------------------------------------------
+    console.log('\n--- 9. Environment Variable Change & Admin Sync ---');
+    process.env.ADMIN_EMAIL = 'amannishad6476@gmail.com';
+    process.env.ADMIN_PASSWORD = 'Admin@123456';
+    await autoSeed();
+
+    const oldEmailLogin = await request('/api/auth/login', {
+      method: 'POST',
+      body: { email: 'admin@munnalaltest.com', password: 'Admin@123456' },
+    });
+    assert(oldEmailLogin.status === 401, 'Previous admin email returns 401 after ADMIN_EMAIL synchronization');
+
+    const syncedLogin = await request('/api/auth/login', {
+      method: 'POST',
+      body: { email: 'amannishad6476@gmail.com', password: 'Admin@123456' },
+    });
+    assert(syncedLogin.status === 200 && typeof syncedLogin.data.token === 'string', 'Updated ADMIN_EMAIL and ADMIN_PASSWORD succeed with 200 and token after autoSeed');
+
+    const syncedAdminCheck = await request('/api/stats/dashboard', {
+      token: syncedLogin.data.token,
+    });
+    assert(syncedAdminCheck.status === 200, 'Protected admin endpoint accepts token from synchronized admin account');
 
     console.log(`\n========================================`);
     console.log(`📊 Test Results: ${passed} Passed, ${failed} Failed`);

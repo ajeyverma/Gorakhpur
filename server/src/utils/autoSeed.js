@@ -55,6 +55,9 @@ const autoSeed = async () => {
   try {
     const adminEmail = (process.env.ADMIN_EMAIL || 'amannishad6476@gmail.com').toLowerCase().trim();
     const rawPassword = process.env.ADMIN_PASSWORD || 'Admin@123456';
+    if (process.env.ADMIN_PASSWORD && !isStrongPassword(process.env.ADMIN_PASSWORD)) {
+      console.warn('⚠️ ADMIN_PASSWORD in environment does not meet complexity requirements (min 12 chars, uppercase, lowercase, number, special char). Using default fallback password.');
+    }
     const password = isStrongPassword(rawPassword) ? rawPassword : 'Admin@123456';
 
     const existingAdmin = await User.findOne({
@@ -65,15 +68,38 @@ const autoSeed = async () => {
     }).select('+password');
 
     if (existingAdmin) {
-      if (process.env.ADMIN_PASSWORD && isStrongPassword(process.env.ADMIN_PASSWORD)) {
-        existingAdmin.password = process.env.ADMIN_PASSWORD;
+      let updated = false;
+
+      if (existingAdmin.email !== adminEmail) {
+        existingAdmin.email = adminEmail;
+        updated = true;
+      }
+
+      if (!existingAdmin.isActive) {
         existingAdmin.isActive = true;
-        await existingAdmin.save();
-        console.log(`👤 Admin password synchronized from environment for: ${existingAdmin.email}`);
-      } else if (!existingAdmin.password.startsWith('$2a$') && !existingAdmin.password.startsWith('$2b$')) {
+        updated = true;
+      }
+
+      if (!existingAdmin.password.startsWith('$2a$') && !existingAdmin.password.startsWith('$2b$')) {
         existingAdmin.password = await bcrypt.hash(existingAdmin.password, 12);
-        existingAdmin.isActive = true;
-        await existingAdmin.save({ validateBeforeSave: false });
+        updated = true;
+      } else if (process.env.ADMIN_PASSWORD && isStrongPassword(process.env.ADMIN_PASSWORD)) {
+        const isSamePassword = await bcrypt.compare(process.env.ADMIN_PASSWORD, existingAdmin.password);
+        if (!isSamePassword) {
+          existingAdmin.password = process.env.ADMIN_PASSWORD;
+          updated = true;
+        }
+      } else if (!process.env.ADMIN_PASSWORD) {
+        const hasLegacyFallback = await bcrypt.compare('Munnalal@2026!Admin', existingAdmin.password);
+        if (hasLegacyFallback) {
+          existingAdmin.password = password;
+          updated = true;
+        }
+      }
+
+      if (updated) {
+        await existingAdmin.save();
+        console.log(`👤 Admin account synchronized from environment for: ${existingAdmin.email}`);
       }
     } else {
       await User.create({
