@@ -12,8 +12,8 @@ const Footer = () => {
       {/* Decorative top border */}
       <div className="h-1 w-full gradient-gold" />
 
-      <div className="container-custom py-16">
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-10">
+      <div className="container-custom mt-4 mb-5 pt-14 pb-16 sm:mt-6 sm:mb-7 sm:pt-16 sm:pb-20 lg:mt-8 lg:mb-9 lg:pt-20 lg:pb-24">
+        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-8 lg:gap-10 my-8 sm:my-10 lg:my-12">
           {/* Brand */}
           <div className="lg:col-span-1">
             <Link to="/" className="flex items-center gap-3 mb-5">
@@ -126,8 +126,8 @@ const Footer = () => {
       </div>
 
       {/* Bottom Bar */}
-      <div className="border-t border-white/10">
-        <div className="container-custom py-5 flex flex-col md:flex-row items-center justify-between gap-4 text-sm text-white/50">
+      <div className="border-t border-white/10 mt-8 mb-4 sm:mt-10 sm:mb-6" style={{ paddingTop: '15px' }}>
+        <div className="container-custom pt-[15px] pb-10 sm:pt-[15px] sm:pb-12 flex flex-col md:flex-row items-center justify-between gap-3 sm:gap-4 text-sm text-white/50">
           <p>© {currentYear} Munnalal Painter. All rights reserved.</p>
           <p className="text-center">
             Painter in Gorakhpur | House Painting | Interior Painting | Exterior Painting | Texture Painting
